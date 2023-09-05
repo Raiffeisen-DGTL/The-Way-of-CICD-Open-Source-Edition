@@ -1,0 +1,95 @@
+.time_tracker:
+  image: alpine:3.18.3
+  before_script:
+    - |
+      #!/bin/bash
+      set -e
+      run () {
+        PREFIX=$(if [[ "$DRY_RUN" == "1" ]]; then echo "dry run"; else echo "run"; fi)
+        echo "$PREFIX: $*"
+        if [[ "$DRY_RUN" == "1" ]]; then
+          return 0
+        fi
+        eval "$@"
+      }
+      use_printf=`printf "%(true)T\n" -1 2>/dev/null` || use_printf=false
+      use_awk=`awk 'BEGIN{print(strftime("true"));}'` || use_awk=false
+      echo "logging: use_printf=$use_printf; use_awk=$use_awk"
+      if $use_printf ; then
+        logging_pipe=$$.logging
+        mkfifo $logging_pipe
+        (set +x;while read -r line;do printf "%(%H:%M:%S)T  %s\n" -1 "$line";done) <$logging_pipe&
+        exec >$logging_pipe 2>&1
+        rm $logging_pipe
+      elif $use_awk ; then
+        logging_pipe=$$.logging
+        mkfifo $logging_pipe
+        awk '{printf("%s  %s\n",strftime("%H:%M:%S"),$0);}' <$logging_pipe&
+        exec >$logging_pipe 2>&1
+        rm $logging_pipe
+      else
+        echo "Can't setup timestamped logging."
+      fi
+      echo "logging: Started."
+
+.get_certificate:
+  variables:
+    VAULT_ADDRESS: "https://path.to.your.pki:8200"
+    PKI_ROLE_ID: "$PKI_TEST_ROLE_ID"
+    PKI_SECRET_ID: "$PKI_TEST_SECRET_ID"
+    PKI_COMMON_NAME: "test.example.com"
+    PKI_ALT_NAMES: "test2.example.com,test3.example.com"
+    PKI_TTL: "8760h"
+    PKI_ROLE_NAME: "$PKI_ROLE_NAME"
+  image: msvechla/vaultbot:1.13
+  script:
+    - mkdir ./vaultbot/
+    - /root/vaultbot 
+      --vault_addr=${VAULT_ADDRESS}
+      --vault_auth_method=approle 
+      --vault_app_role_role_id=${PKI_ROLE_ID}
+      --vault_app_role_secret_id=${PKI_SECRET_ID}
+      --pki_mount=pki_int 
+      --pki_role_name=$PKI_ROLE_NAME
+      --pki_common_name=${PKI_COMMON_NAME}
+      --pki_alt_names=${PKI_ALT_NAMES}
+      --pki_ttl=${PKI_TTL} 
+      --pki_renew_time=720h 
+      --pki_private_key_format=pkcs8 
+      --pki_cert_path=./vaultbot/certificate.crt 
+      --pki_privkey_path=./vaultbot/private.key
+    - ls -la ./vaultbot/
+  artifacts:
+    paths:
+      - ./vaultbot/
+
+.get_vault_creds:
+  image: vault:1.13.3
+  variables:
+    LOGIN_FIELD: "login"
+    PASSWORD_FIELD: "password"
+  before_script:
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=gitlab-role jwt=$CI_JOB_JWT)"
+    - echo "LOGIN=`vault kv get -field=$LOGIN_FIELD $VAULT_PATH_TO_SECRET`" > vault.env
+    - echo "PASSWORD=`vault kv get -field=$PASSWORD_FIELD $VAULT_PATH_TO_SECRET`" >> vault.env
+  cache:
+    - key: $CI_PIPELINE_ID
+      paths:
+        - vault.env
+
+.define_registry:
+  stage: define_registry
+  image: alpine:3.18.3
+  script:
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]
+      then
+        echo "REGISTRY=${REGISTRY_HOST}" > registry.env
+      else
+        echo "REGISTRY=${SNAPSHOT_REGISTRY_HOST}" > registry.env
+      fi
+      cat registry.env
+  artifacts:
+    reports:
+      dotenv:
+        - ./registry.env

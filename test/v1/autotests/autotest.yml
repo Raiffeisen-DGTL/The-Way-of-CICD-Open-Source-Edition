@@ -1,0 +1,266 @@
+variables:
+  GRADLE: "./gradlew"
+  MAVEN: "mvn"
+  PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+  JAVA_11_IMAGE: "eclipse-temurin:11.0.20.1_1-jdk-alpine"
+  JAVA_17_IMAGE: "eclipse-temurin:17.0.6_10-jdk-alpine"
+  BUILD_JOB_IMAGE: $JAVA_17_IMAGE
+  PIPELINE_CUSTOM_FOLDER: "test/v1"
+  MAVEN_SETTINGS: "-s .m2/settings.xml"
+  MAVEN_OUT_DIR: "./target"
+  GRADLE_OUT_DIR: "./build"
+  MAVEN_ALLURE_RESULTS_DIR: "$MAVEN_OUT_DIR/allure-results/"
+  GRADLE_ALLURE_RESULTS_DIR: "$GRADLE_OUT_DIR/allure-results/"
+  MAVEN_ALLURE_REPORT_DIR: "$MAVEN_OUT_DIR/site/allure-maven-plugin/"
+  GRADLE_ALLURE_REPORT_DIR: "$GRADLE_OUT_DIR/reports/allure-report/allureReport"
+
+.get_maven_wrapper:
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        if [[ "$USE_REPO_WRAPPER" == "true" && -d ".mvn/wrapper" && -f "mvnw" ]]
+        then
+          echo "MAVEN WRAPPER: repo"
+        else
+          echo "MAVEN WRAPPER: qa-pipeline-template"
+          rm -rf .mvn mvnw
+          mv wrappers/maven/mvn .mvn
+          mv wrappers/maven/mvnw .
+          export MVNW_USERNAME="$REGISTRY_USER"
+          export MVNW_PASSWORD="$REGISTRY_PASSWORD"
+        fi
+        chmod +x mvnw
+      fi
+
+.get_gradle_wrapper:
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        if [[ "$USE_REPO_WRAPPER" == "true" && -d "gradle/wrapper" && -f "gradlew" ]]
+        then
+          echo "GRADLE WRAPPER: repo"
+        else
+          echo "GRADLE WRAPPER: qa-pipeline-template"
+          rm -rf gradle gradlew
+          mv wrappers/gradle/gradle .
+          mv wrappers/gradle/gradlew .
+          export WRAPPER_PARAMS="-Dgradle.wrapperUser=$REGISTRY_USER -Dgradle.wrapperPassword=$REGISTRY_PASSWORD"
+        fi
+        chmod +x gradlew
+      fi
+
+.load_vault:
+  script:
+    - |
+      if [[ -f "vault.env" ]]
+      then
+        source vault.env
+      else
+        echo "The vault variables are not defined"
+      fi
+
+.test_env_prepare:
+  stage: prepare
+  image: alpine/git:2.40.1
+  script:
+    - |
+      PIPELINE_FOLDER=
+      if [[ -z "${PIPELINE_REPO}" ]]
+      then
+        echo "ERROR: PIPELINE_REPO variable is not set"
+        exit 1
+      else
+        echo "PIPELINE_REPO: $PIPELINE_REPO"
+        PIPELINE_FULL_REPO=$(echo "$PIPELINE_REPO" | sed -e "s#https://#https://gitlab-ci-token:${CI_JOB_TOKEN}@#")
+        PIPELINE_FOLDER=$(echo "$PIPELINE_REPO" | sed -e 's#https://YOUR.GITLAB.URL/##' -e 's#.git##' | awk -F '/' '{print $NF}')
+        if [[ -z "${PIPELINE_BRANCH}" ]]
+        then
+          git clone $PIPELINE_FULL_REPO
+        else
+          echo "PIPELINE_BRANCH: $PIPELINE_BRANCH"
+          git clone -b $PIPELINE_BRANCH $PIPELINE_FULL_REPO
+        fi
+      fi
+    - |
+      if [[ $MATTERMOST_BOT_TOKEN ]]
+      then
+        mv $PIPELINE_FOLDER/$PIPELINE_CUSTOM_FOLDER/test_utils/ .
+      fi
+    - |
+      if [[ "$USE_REPO_WRAPPER" != "true" ]]
+      then
+        mv $PIPELINE_FOLDER/$PIPELINE_CUSTOM_FOLDER/wrappers/ .
+      fi
+    - !reference [ .get_maven_wrapper, script ]
+    - !reference [ .get_gradle_wrapper, script ]
+  artifacts:
+    paths:
+      - test_utils/
+      - wrappers/
+  rules:
+    #    job starts if mattermost token defined or your onw wrapper used
+    - if: $MATTERMOST_BOT_TOKEN || $USE_REPO_WRAPPER != "true"
+
+.build_tests:
+  stage: build
+  image: $BUILD_JOB_IMAGE
+  script:
+    - echo "BUILD BEGIN"
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS test-compile $TEST_PARAMS
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS clean && $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS testClasses
+      fi
+    - echo "BUILD END"
+  artifacts:
+    paths:
+      - $MAVEN_OUT_DIR
+      - $GRADLE_OUT_DIR
+      - ./test_utils/
+    expire_in: 1 hrs
+  cache:
+    key: "$CI_PROJECT_NAME"
+    paths:
+      - .m2/repository/
+      - .mvn/
+      - .gradle/
+      - gradle/
+
+.run_autotests_java:
+  image: $BUILD_JOB_IMAGE
+  stage: test
+  needs:
+    - job: build_tests
+  cache:
+    - key: $CI_PIPELINE_ID
+      paths:
+        - vault.env
+    - key: "$CI_PROJECT_NAME"
+      paths:
+        - .m2/repository/
+        - .mvn/
+        - .gradle/
+        - gradle/
+  script:
+    - echo "$WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS $TEST_PARAMS $MAVEN_CLI_OPTS"
+    - !reference [ .load_vault, script ]
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS surefire:test $TEST_PARAMS
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE -PskipAssemble $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS $TEST_PARAMS test >> log.log
+      fi
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_RESULTS_DIR
+      - $GRADLE_ALLURE_RESULTS_DIR
+      - ./test_utils/
+      - ./log.log
+    expire_in: 1d
+  allow_failure: true
+
+.create_autotests_report:
+  image: $BUILD_JOB_IMAGE
+  stage: test_report
+  needs:
+    - job: run_autotests_java
+  script:
+    - |
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS allure:report
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS allureReport
+      fi
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_REPORT_DIR
+      - $GRADLE_ALLURE_REPORT_DIR
+      - ./test_utils/
+    expire_in: 1d
+  allow_failure: true
+  cache:
+    key: "$CI_PROJECT_NAME"
+    paths:
+      - .m2/repository/
+      - .mvn/
+      - .gradle/
+      - gradle/
+
+.pages:
+  stage: deploy-pages
+  image: alpine:3.18.3
+  needs:
+    - job: create_autotests_report
+  script:
+    - "mkdir public"
+    - |
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        allure_report_dir="$MAVEN_ALLURE_REPORT_DIR"
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        allure_report_dir="$GRADLE_ALLURE_REPORT_DIR"
+      fi
+    - "cp -r $allure_report_dir/* ./public"
+  artifacts:
+    paths:
+      - public
+    expire_in: 1 hrs
+  allow_failure: true
+
+.send_report_to_mattermost:
+  image: $BUILD_JOB_IMAGE
+  stage: send_notification
+  needs:
+    - job: test_env_prepare
+    - job: create_autotests_report
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        export allureFolder=$MAVEN_ALLURE_REPORT_DIR
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        export allureFolder=$GRADLE_ALLURE_REPORT_DIR
+      fi
+    - |
+      json='{
+        "base": {  
+          "project": "'${CI_PROJECT_PATH#*/}'",
+          "environment": "'$ENVIRONMENT_NOTIF'",
+          "language": "ru",
+          "comment": "Тесты запущены из ветки: '$CI_COMMIT_BRANCH' \nСтатическая страница с последним отчетом: '$CI_PAGES_URL' \n'$COMMENT_NOTIF'",
+          "allureFolder": "'$allureFolder'",
+          "enableChart": true,
+          "reportLink": "https://'${CI_PROJECT_PATH%%/*}'.glp.YOUR.GITLAB.URL/-/'${CI_PROJECT_PATH#*/}'/-/jobs/'${CI_JOB_ID}'/artifacts/'${allureFolder}'/index.html",
+          "messenger": "mattermost"
+        },
+        "mattermost": {
+          "url": "YOUR.MATTERMOST.SERVER",
+          "token": "'$MATTERMOST_BOT_TOKEN'",
+          "chat": "'$MATTERMOST_CHAT_ID'"
+        }
+      }'
+    - echo "$json" > params.json
+    - cat params.json
+    - java -DconfigFile=params.json -jar test_utils/allure-notifications-4.2.1.jar
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_REPORT_DIR
+      - $GRADLE_ALLURE_REPORT_DIR
+    expire_in: 30d
+  allow_failure: true

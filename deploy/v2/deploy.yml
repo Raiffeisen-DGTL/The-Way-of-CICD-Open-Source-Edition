@@ -1,0 +1,54 @@
+### Deploy via reference tag
+.deploy:
+  ### Image for deploy
+  image: alpine/k8s:1.28.0
+  ### Fetch kubeconfig
+  fetch_kubeconfig:
+    - export KUBECONFIG="$K8S_CONFIG"
+  ### Delpoy via kubectl
+  kubectl:
+    - kubectl apply -f ${YAML_TO_DEPLOY} ${DEPLOY_ARGS}
+  ### Deploy via helm
+  helm:
+    - helm upgrade --install $RELEASE_NAME $CHART_TO_DEPLOY -n $NAMESPACE $HELM_ARGS
+
+### Deploy via extends
+.deploy-with-kubectl:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    YAML_TO_DEPLOY: "$CI_PROJECT_DIR/manifests/"
+    DEPLOY_ARGS: ""
+  script:
+    - CMD="kubectl apply -f ${YAML_TO_DEPLOY} ${DEPLOY_ARGS}"
+    - eval $CMD
+
+.deploy-with-helm:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    NAMESPACE: "$CI_PROJECT_NAME"
+    RELEASE_NAME: "$CI_PROJECT_NAME"
+    CHART_TO_DEPLOY: "helm-chart-go-web-server"
+    HELM_ARGS: >-
+      --wait
+  script:
+    - CMD="helm upgrade --install $RELEASE_NAME $CHART_TO_DEPLOY -n $NAMESPACE $HELM_ARGS"
+    - eval $CMD
+
+.deploy-with-helm-by-gitlab-agent:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    NAMESPACE: "$CI_PROJECT_NAME"
+    RELEASE_NAME: "$CI_PROJECT_NAME"
+    GITLAB_AGENT_PROJECT: "YOUR_PROJECT_WITH_GITLAB_AGENT"
+    KUBERNETES_CLUSTER_NAME: "NAME_OF_YOUR_KUBERNETES_CLUSTER" # Infrastructure -> Kubernetes clusters
+    CHART_TO_DEPLOY: "helm-chart-go-web-server"
+    HELM_ARGS: >-
+      --wait
+      --atomic
+  before_script:
+    - kubectl config use-context ${GITLAB_AGENT_PROJECT}:${KUBERNETES_CLUSTER_NAME}
+  script:
+    - !reference [.deploy, helm]

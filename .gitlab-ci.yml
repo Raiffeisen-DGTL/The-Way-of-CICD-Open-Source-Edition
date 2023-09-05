@@ -1,0 +1,13 @@
+include:
+  - project: 'path-to-gitlab-repo/the-way-of-cicd-open-source-edition'
+    ref: $CI_COMMIT_REF_NAME
+    file:
+      - '/version/v4/version.yml'
+
+stages:
+  - version
+
+version:
+  stage: version
+  extends:
+    - .version_git

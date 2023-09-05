@@ -1,0 +1,37 @@
+ext.imagePath = {
+    def registry_host = System.getenv('REGISTRY_HOST')
+    def registry_path = System.getenv('REGISTRY_PATH')
+    def image_name = System.getenv('IMAGE_NAME')
+    return [registry_host,registry_path,image_name].join('/')
+}
+
+ext.imageTag = {
+    return System.getenv('IMAGE_TAG')
+}
+
+jib {
+    from {
+        image = 'eclipse-temurin:17.0.6_10-jre-alpine'
+/* uncomment if you need source repo auth
+        auth {
+            username "$registryUser"
+            password "$registryPassword"
+        }
+    }
+    to {
+        image = "${imagePath()}:${imageTag()}"
+        auth {
+            username "$registryUser"
+            password "$registryPassword"
+*/        }
+    }
+
+    container {
+        user = 'www-data'
+        jvmFlags = ['-Xms512m','-Xmx1024m']
+        ports = ['8080']
+        environment = [TZ: "Europe/Moscow",LANG: "en_US.UTF-8"]
+        creationTime = "USE_CURRENT_TIMESTAMP"
+    }
+    new File(projectDir, "deploy.env").text = "image_path=${imagePath()}\nimage_tag=${imageTag()}\n"
+}

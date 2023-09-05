@@ -1,0 +1,20 @@
+### Roll-back for reference tags
+.roll-back:
+  ### Image for roll-back
+  image: alpine/k8s:1.28.0
+  ### Fetch kubeconfig
+  fetch_kubeconfig:
+    - export KUBECONFIG="$K8S_CONFIG"
+  ### Roll-back script
+  helm-roll-back:
+    - helm rollback $RELEASE_NAME -n $NAMESPACE
+
+### Roll-back for extends
+.roll-back-helm:
+  stage: roll-back
+  image: alpine/k8s:1.28.0
+  variables:
+    NAMESPACE: "$CI_PROJECT_NAME"
+    RELEASE_NAME: "$CI_PROJECT_NAME"
+  script:
+    - helm rollback $RELEASE_NAME -n $NAMESPACE

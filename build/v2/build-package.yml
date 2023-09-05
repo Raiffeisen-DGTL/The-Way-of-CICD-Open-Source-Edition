@@ -1,0 +1,104 @@
+### Build image via kaniko
+
+.build_kaniko:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:1.7.0
+    entrypoint: [""]
+  variables:
+    REGISTRY_HOST: #default points to hub.docker.com
+    DOCKERFILE: "Dockerfile"
+  before_script:
+  script:
+    - echo "{\"auths\":{\"$REGISTRY_HOST\":{\"username\":\"$REGISTRY_USER\",\"password\":\"$REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - >
+      CMD="/kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/$DOCKERFILE
+      --destination $REGISTRY_HOST/$DOCKER_REGISTRY/${IMAGE_NAME}:$IMAGE_TAG
+      --build-arg REGISTRY_USER=$REGISTRY_USER
+      --build-arg REGISTRY_PASSWORD=$REGISTRY_PASSWORD
+      $DOCKER_BUILD_ARGS"
+    - eval $CMD
+
+### Build image via docker
+
+.build_docker:
+  stage: build
+  image: docker:24.0.5-cli-alpine3.18
+  services:
+    - name: docker:24.0.5-dind-rootless
+      alias: dind
+  variables:
+    DOCKER_HOST: tcp://dind:2375
+    REGISTRY_HOST: ""
+    DOCKERFILE: "Dockerfile"
+  script:
+    - docker login -u "$REGISTRY_USER" -p "$REGISTRY_PASSWORD" $REGISTRY_HOST || exit 1
+    - >
+      CMD="docker build .
+      -f $DOCKERFILE ${DOCKER_BUILD_ARGS}
+      --tag $REGISTRY_HOST/$DOCKER_REGISTRY/${IMAGE_NAME}:$IMAGE_TAG
+      --build-arg REGISTRY_USER=${REGISTRY_USER}
+      --build-arg REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
+      $DOCKER_BUILD_ARGS"
+    - eval $CMD
+    - docker push $REGISTRY_HOST/$DOCKER_REGISTRY/${IMAGE_NAME}:$IMAGE_TAG
+  after_script:
+    - docker logout $REGISTRY_HOST
+
+
+### Build and test with gradle
+
+.build_and_test_gradle:
+  stage: build
+  image: $JVM_IMAGE
+  services:
+    - name: docker:24.0.5-dind-rootless
+  variables:
+    JVM_IMAGE: "gradle:jdk11-alpine"
+    PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+    DOCKER_HOST: tcp://dind:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    TESTCONTAINERS_RYUK_DISABLED: "true"
+    TESTCONTAINERS_CHECKS_DISABLE: "true"
+  artifacts:
+    reports:
+      junit: "$JUNIT_PATH"
+    paths:
+      - build
+    expire_in: 30 mins
+  script:
+    - $GRADLE -version
+    - $GRADLE build --build-cache $GRADLE_PARAMS
+    - export GRADLE_USER_HOME=`pwd`/.gradle
+  cache:
+    key: $PIPELINE_CACHE_KEY
+    paths:
+      - $GRADLE_USER_HOME
+    policy: push
+
+### Build and publish image with gradle
+
+.build_image_jib:
+  stage: publish-image
+  image: $JVM_IMAGE
+  services:
+    - name: docker:24.0.5-dind-rootless
+  variables:
+    JVM_IMAGE: "gradle:jdk11-alpine"
+    DOCKER_HOST: tcp://localhost:2375
+    PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+  script:
+    - $GRADLE -version
+    - $GRADLE jib $GRADLE_PARAMS
+    - cat ./deploy.env
+  artifacts:
+    paths:
+      - ./deploy.env
+  cache:
+    key: $PIPELINE_CACHE_KEY
+    paths:
+      - $GRADLE_USER_HOME
+    policy: pull
