@@ -1,6 +1,5 @@
 <div align="center">
   <center><h1>The way of CI/CD project</h1></center>
-  <center><img src="./docs-logo/LEGO_logo.svg.png" align="center" width="500" alt="lego"></center>
 </div>
 
 ## About the Project
