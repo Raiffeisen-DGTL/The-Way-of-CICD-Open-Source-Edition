@@ -11,7 +11,6 @@ The Way of CI/CD includes the following pipeline stages:
 - [code-scan](./code-scan/)
 - [version](./version/)
 - [build](./build/)
-- [binary-scan](./binary-scan/)
 - [test](./test/)
 - [release](./release/)
 - [deploy](./deploy/)
@@ -112,11 +111,6 @@ For more details on all directives and implementation details, you can refer to 
 - Complexity in artifact formation logic should be minimized.
 - It is not recommended to perform a complete build of the base image directly in the service pipeline; instead, it should be treated as a base image and pulled from the registry.
 - Avoid using `latest` tags in the versioning of external service dependencies.
-
-### Binary Scan
-
-- Image scanning should have a mechanism for blocking or skipping further pipeline execution based on conditions determined by the team.
-- After scanning images, we should be able to examine vulnerabilities in the scanned image.
 
 ### Test
 
