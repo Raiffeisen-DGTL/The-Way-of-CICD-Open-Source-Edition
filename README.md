@@ -1,6 +1,8 @@
 <div align="center">
   <center><h1>The way of CI/CD project</h1></center>
+  <center><img src="./docs-logo/thewayofcicd.png" align="center" width="500" alt="the way of cicd"></center>
 </div>
+
 
 ## About the Project
 
@@ -58,9 +60,68 @@ For more details on all directives and implementation details, you can refer to 
 
 ## Pipeline Design
 
-<p align="center">
-  <img  src="./docs-logo/pipeline-hld.png" alt="lego">
-</p>
+The diagram shows the main stages of the pipeline, which are recommended to be used in your project to build a pipeline.
+
+```mermaid
+flowchart LR
+
+  subgraph test[test]
+    A(custom tests)
+    end
+
+  subgraph codescan[code-scan]
+    B(lint)
+    C(sonar scan)
+    end
+
+  subgraph version[version]
+    D(gitversion)
+    end
+
+  subgraph pipeline[pipeline]
+    E(define registry)
+    F(define migrations)
+    end
+
+  subgraph build[build]
+    G(build image \n push image)
+    end
+
+  subgraph binaryscan[binary-scan]
+    H(appsec)
+    end
+
+  subgraph deploy[deploy]
+    I(deploy via helm)
+    J(roll-back via helm)
+    end
+
+  dev-env(Dev)
+  test-env(Test)
+  prev-env(Preview)
+  prod-env(Production)
+
+ subgraph release[release]
+  K(create \n gitlab \n release)
+  end
+
+  A -- "send report" --> C
+  codescan --> version
+  version --> build
+  E --> build
+  F --> build
+  build --> binaryscan
+  binaryscan --> deploy
+  deploy --> dev-env
+  deploy --> test-env
+  deploy --> prev-env
+  deploy --> prod-env
+  I -- "on failure" --> J
+  deploy ---> release
+
+  classDef ClusterBackground fill:#ffffde;
+  class test,codescan,version,pipeline,build,binaryscan,deploy,release ClusterBackground;
+```
 
 ## Recommended Requirements for Implementing Your Pipeline
 
@@ -114,7 +175,11 @@ For more details on all directives and implementation details, you can refer to 
 
 ### Test
 
-- Team Responsibility
+Autotest section includes:
+
+- Running Java+Gradle/Java+Maven autotests;
+- Creating reports in Allure `.create_autotests_report` with saving reports in Gitlab pages `.pages`;
+- The ability to send reports on autotest runs to the MatterMattermost via bot `.send_report_to_mattermost` has been taken into account.
 
 ### Release
 
