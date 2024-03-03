@@ -68,8 +68,11 @@
   variables:
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"
+  id_tokens:
+    VAULT_ID_JWT:
+      aud: $VAULT_ADDR
   before_script:
-    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=gitlab-role jwt=$CI_JOB_JWT)"
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=gitlab-role jwt=$VAULT_ID_JWT)"
     - echo "LOGIN=`vault kv get -field=$LOGIN_FIELD $VAULT_PATH_TO_SECRET`" > vault.env
     - echo "PASSWORD=`vault kv get -field=$PASSWORD_FIELD $VAULT_PATH_TO_SECRET`" >> vault.env
   cache:
