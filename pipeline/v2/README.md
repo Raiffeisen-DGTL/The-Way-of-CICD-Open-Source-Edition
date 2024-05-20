@@ -13,7 +13,7 @@ This section contains various auxiliary templates for the pipeline, including th
 ## Required Variables for `.get_vault_creds`
 ```yaml
 .get_vault_creds:
-VAULT_ADDR # Vault project area address
+VAULT_ADDRESS # Vault project area address
 VAULT_PATH_TO_SECRET # Path to the secret from the root storage (e.g., kv/secret or stage/service/secret - any level of nesting)
 LOGIN_FIELD # Login field. Defaults to 'login'. It's better to specify it explicitly to avoid unexpected behavior in GitLab when merging variables.
 PASSWORD_FIELD # Password field. Defaults to 'password'. Similarly to the login field, it's better to specify it explicitly.
@@ -76,7 +76,7 @@ sonarqube:
 use_vault:
   stage: vault
   variables:
-    VAULT_ADDR: "https://your.vault.path.com"
+    VAULT_ADDRESS: "https://your.vault.path.com"
     VAULT_PATH_TO_SECRET: "kv"
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"
@@ -91,7 +91,7 @@ use_vault:
 use_vault:
   stage: vault
   variables:
-    VAULT_ADDR: "https://your.vault.path.com"
+    VAULT_ADDRESS: "https://your.vault.path.com"
     VAULT_PATH_TO_SECRET: "kv"
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"
@@ -119,7 +119,7 @@ get_another_secret:
   image: $YOUR_FAV_IMG
   stage: third_stage
   variables:
-    VAULT_ADDR: "https://your.vault.path.com"
+    VAULT_ADDRESS: "https://your.vault.path.com"
     VAULT_PATH_TO_SECRET: "kv"
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"

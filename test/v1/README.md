@@ -195,7 +195,7 @@ include:
 use_vault:
   stage: prepare
   variables:
-    VAULT_ADDR: "https://your.vault.path.com"
+    VAULT_ADDRESS: "https://your.vault.path.com"
     VAULT_PATH_TO_SECRET: "kv/your_project"
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"
