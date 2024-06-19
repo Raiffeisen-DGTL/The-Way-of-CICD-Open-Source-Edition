@@ -68,9 +68,10 @@
   variables:
     LOGIN_FIELD: "login"
     PASSWORD_FIELD: "password"
+    VAULT_ADDRESS: "https://your.vault.path.com"
   id_tokens:
     VAULT_ID_JWT:
-      aud: $VAULT_ADDR
+      aud: $VAULT_ADDRESS
   before_script:
     - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=gitlab-role jwt=$VAULT_ID_JWT)"
     - echo "LOGIN=`vault kv get -field=$LOGIN_FIELD $VAULT_PATH_TO_SECRET`" > vault.env
