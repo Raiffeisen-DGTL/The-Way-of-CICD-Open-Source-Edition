@@ -1,0 +1,198 @@
+include:
+  - 'test/autotests/prepare.yml'
+
+variables:
+  GRADLE: "./gradlew"
+  MAVEN: "mvn"
+  PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+  JAVA_11_IMAGE: "eclipse-temurin:11.0.20.1_1-jdk-alpine"
+  JAVA_17_IMAGE: "eclipse-temurin:17.0.6_10-jdk-alpine"
+  JAVA_21_IMAGE: "eclipse-temurin:21.0.4_7-jdk-alpine"
+  BUILD_JOB_IMAGE: $JAVA_17_IMAGE
+  PIPELINE_CUSTOM_FOLDER: "test"
+  MAVEN_SETTINGS: "-s .m2/settings.xml"
+  MAVEN_OUT_DIR: "./target"
+  GRADLE_OUT_DIR: "./build"
+  MAVEN_ALLURE_RESULTS_DIR: "$MAVEN_OUT_DIR/allure-results/"
+  GRADLE_ALLURE_RESULTS_DIR: "$GRADLE_OUT_DIR/allure-results/"
+  MAVEN_ALLURE_REPORT_DIR: "$MAVEN_OUT_DIR/site/allure-maven-plugin/"
+  GRADLE_ALLURE_REPORT_DIR: "$GRADLE_OUT_DIR/reports/allure-report/allureReport"
+  BUILD_SEPARATELY: "false"
+  BRANCH_NOTIF: "$CI_COMMIT_BRANCH"
+  KAFKA_CACHE_DIR: ""
+
+.enableTLSv1_3:
+  script:
+    - |
+      echo "ENABLE_TLS_V1_3: $ENABLE_TLS_V1_3"
+      if [[ "$ENABLE_TLS_V1_3" == "true" ]]
+      then
+        sed -i -e 's/jdk.tls.disabledAlgorithms.*/jdk.tls.disabledAlgorithms=SSLv3, RC4, DES, MD5withRSA,/g' $JAVA_HOME/conf/security/java.security
+      fi
+
+.build_tests:
+  image: $BUILD_JOB_IMAGE
+  script:
+    - echo "BUILD BEGIN"
+    - !reference [ .enableTLSv1_3, script ]
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS test-compile $TEST_PARAMS >> build_log.log
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS clean && $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS testClasses >> build_log.log
+      fi
+    - echo "BUILD END"
+  artifacts:
+    paths:
+      - $MAVEN_OUT_DIR
+      - $GRADLE_OUT_DIR
+      - ./test_utils/
+      - ./build_log.log
+    expire_in: 1 hrs
+  cache:
+    key: "$PIPELINE_CACHE_KEY"
+    paths:
+      - .m2/repository/
+      - .mvn/
+      - .gradle/
+      - gradle/
+  rules:
+    #    job starts if mattermost token defined or your onw wrapper used
+    - if: $BUILD_SEPARATELY == "true"
+
+.run_autotests_java:
+  image: $BUILD_JOB_IMAGE
+  variables:
+    SKIP_ASSEMBLE: ""
+  cache:
+    - key: $CI_PIPELINE_ID
+      paths:
+        - vault.env
+        - $KAFKA_CACHE_DIR/
+    - key: "$PIPELINE_CACHE_KEY"
+      paths:
+        - .m2/repository/
+        - .mvn/
+        - .gradle/
+        - gradle/
+  before_script:
+    - |
+      if [[ "$BUILD_SEPARATELY" == "true" ]]
+      then
+        SKIP_ASSEMBLE="-PskipAssemble"
+        MVN_RUN_TESTS="surefire:test"
+      else
+        MVN_RUN_TESTS="test"
+      fi
+    - !reference [ .extract_kafka_cache, script ]
+  script:
+    - !reference [ .load_vault, script ]
+    - !reference [ .enableTLSv1_3, script ]
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS $MVN_RUN_TESTS $TEST_PARAMS >> run_log.log || exit 0
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE $SKIP_ASSEMBLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS $TEST_PARAMS test --continue >> run_log.log || exit 0
+      fi
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_RESULTS_DIR
+      - $GRADLE_ALLURE_RESULTS_DIR
+      - ./test_utils/
+      - ./run_log.log
+    expire_in: 1d
+  allow_failure: true
+
+.create_autotests_report:
+  image: $BUILD_JOB_IMAGE
+  script:
+    - !reference [ .enableTLSv1_3, script ]
+    - |
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        $MAVEN $MAVEN_SETTINGS $MAVEN_CLI_OPTS allure:report
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        $GRADLE $WRAPPER_PARAMS $AUTOTEST_GRADLE_OPTS $GRADLE_PARAMS allureReport
+      fi
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_REPORT_DIR
+      - $GRADLE_ALLURE_REPORT_DIR
+      - ./test_utils/
+    expire_in: 1d
+  allow_failure: true
+  cache:
+    key: "$PIPELINE_CACHE_KEY"
+    paths:
+      - .m2/repository/
+      - .mvn/
+      - .gradle/
+      - gradle/
+
+.pages:
+  image: alpine:3.18.3
+  script:
+    - "mkdir public"
+    - |
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        allure_report_dir="$MAVEN_ALLURE_REPORT_DIR"
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        allure_report_dir="$GRADLE_ALLURE_REPORT_DIR"
+      fi
+    - "cp -r $allure_report_dir/* ./public"
+  artifacts:
+    paths:
+      - public
+    expire_in: 1d
+  allow_failure: true
+
+.send_report_to_mattermost:
+  image: $BUILD_JOB_IMAGE
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        export allureFolder=$MAVEN_ALLURE_REPORT_DIR
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        export allureFolder=$GRADLE_ALLURE_REPORT_DIR
+      fi
+    - |
+      json='{
+        "base": {  
+          "project": "'${CI_PROJECT_PATH#*/}'",
+          "environment": "'$ENVIRONMENT_NOTIF'",
+          "language": "ru",
+          "comment": "The tests are running from the branch: '$BRANCH_NOTIF' \nBy commit: '$CI_COMMIT_SHA' \nStatic page with the latest report: '$CI_PAGES_URL' \n'$COMMENT_NOTIF'",
+          "allureFolder": "'$allureFolder'",
+          "enableChart": true,
+          "reportLink": "https://'${CI_PROJECT_PATH%%/*}'.glp.YOUR.GITLAB.URL/-/'${CI_PROJECT_PATH#*/}'/-/jobs/'${CI_JOB_ID}'/artifacts/'${allureFolder}'/index.html",
+          "messenger": "mattermost"
+        },
+        "mattermost": {
+          "url": "YOUR.MATTERMOST.SERVER",
+          "token": "'$MATTERMOST_BOT_TOKEN'",
+          "chat": "'$MATTERMOST_CHAT_ID'"
+        }
+      }'
+    - echo "$json" > params.json
+    - cat params.json
+    - java -DconfigFile=params.json -jar test_utils/allure-notifications-4.2.1.jar
+  artifacts:
+    when: always
+    paths:
+      - $MAVEN_ALLURE_REPORT_DIR
+      - $GRADLE_ALLURE_REPORT_DIR
+    expire_in: 30d
+  allow_failure: true

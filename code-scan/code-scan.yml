@@ -1,0 +1,352 @@
+.sonarqube-java:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:11.0
+  variables:
+    SONAR_HOST_URL: "https://path.to.your.sonarqube.com/"
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=java -Dsonar.java.coveragePlugin=jacoco -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java"
+    ENABLE_GITLAB_INTEGRATION: "false"
+    IS_MONOREPO: "false"
+    GIT_DEPTH: "0"
+  before_script:
+    - |
+      if [[ -z ${SONAR_PROJECT_KEY+x} ]]
+      then
+        echo "SONAR_PROJECT_KEY is not set. Please set it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+        exit 1
+      else
+        if [[ "${SONAR_PROJECT_KEY%.*}" != "$SONAR_PROJECT_NAME" ]]
+        then
+          echo "SONAR_PROJECT_KEY should be \"$SONAR_PROJECT_NAME.[Project Name]\". Please update it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+          exit 1
+        else
+          echo "SONAR_PROJECT_KEY: $SONAR_PROJECT_KEY"
+        fi
+      fi
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        SONAR_BUILD_OPTIONS="-Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.java.binaries=target/classes -Dsonar.java.libraries=target/dependency/*.jar"
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        SONAR_BUILD_OPTIONS="-Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml -Dsonar.java.binaries=build/classes"
+      fi
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      echo "SONAR_BUILD_OPTIONS: $SONAR_BUILD_OPTIONS"
+      echo "SONAR_JAVA_OPTIONS: $SONAR_JAVA_OPTIONS"
+    - |
+      if [[ -n "$CI_MERGE_REQUEST_ID" ]]
+      then
+        SONAR_MERGE_OPTIONS="-Dsonar.pullrequest.base=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -Dsonar.pullrequest.branch=$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME -Dsonar.pullrequest.key=$CI_MERGE_REQUEST_IID";
+      fi
+      echo "SONAR_MERGE_OPTIONS: $SONAR_MERGE_OPTIONS"
+    - |
+      echo "GITLAB_INTEGRATION_ENABLED: $ENABLE_GITLAB_INTEGRATION"
+      if [[ $ENABLE_GITLAB_INTEGRATION == "true" ]]
+      then
+        echo "IS_MONOREPO: $IS_MONOREPO"
+        wget --method POST \
+        --header "Authorization: Basic $(echo -n $SONAR_TOKEN: | base64)" \
+        --body-data "almSetting=Gitlab&project=${SONAR_PROJECT_KEY}&repository=${CI_PROJECT_ID}&monorepo=${IS_MONOREPO}" \
+        ${SONAR_HOST_URL}api/alm_settings/set_gitlab_binding --tries 1 --timeout 1 --quiet \
+        && echo "Integration with gitlab is enabled" || echo "Failed to enable integration with gitlab"
+      else
+        echo 'You can set $GITLAB_INTEGRATION_ENABLED: "true" to get notifications with scan details'
+      fi
+    - >
+      sonar-scanner -X
+      -Dsonar.projectKey=$SONAR_PROJECT_KEY
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.login=$SONAR_TOKEN
+      -Dsonar.qualitygate.wait=true
+      $SONAR_JAVA_OPTIONS
+      $SONAR_BUILD_OPTIONS
+      $SONAR_MERGE_OPTIONS
+      $SONAR_CUSTOM_OPTIONS
+
+.sonarqube-kotlin:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:11.0
+  variables:
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=kotlin\n
+      -Dsonar.java.coveragePlugin=jacoco\n
+      -Dsonar.sources=src/main/kotlin\n
+      -Dsonar.tests=src/test/kotlin"
+  extends:
+    - .sonarqube-java
+  script:
+    - |
+      if [[ "$BUILD_TYPE" == "maven" ]]
+      then
+        SONAR_BUILD_OPTIONS="-Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.java.binaries=target/classes -Dsonar.java.libraries=target/dependency/*.jar"
+      elif [[ "$BUILD_TYPE" == "gradle" ]]
+      then
+        SONAR_BUILD_OPTIONS="-Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml -Dsonar.java.binaries=build/classes/java/main,build/classes/kotlin/main"
+      fi
+      echo "BUILD_TYPE: $BUILD_TYPE"
+      echo "SONAR_BUILD_OPTIONS: $SONAR_BUILD_OPTIONS"
+      echo "SONAR_JAVA_OPTIONS: $SONAR_JAVA_OPTIONS"
+    - |
+      if [[ -n "$CI_MERGE_REQUEST_ID" ]]
+      then
+        SONAR_MERGE_OPTIONS="-Dsonar.pullrequest.base=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -Dsonar.pullrequest.branch=$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME -Dsonar.pullrequest.key=$CI_MERGE_REQUEST_IID";
+      fi
+      echo "SONAR_MERGE_OPTIONS: $SONAR_MERGE_OPTIONS"
+    - |
+      echo "GITLAB_INTEGRATION_ENABLED: $ENABLE_GITLAB_INTEGRATION"
+      if [[ $ENABLE_GITLAB_INTEGRATION == "true" ]]
+      then
+        echo "IS_MONOREPO: $IS_MONOREPO"
+        wget --method POST \
+        --header "Authorization: Basic $(echo -n $SONAR_TOKEN: | base64)" \
+        --body-data "almSetting=Gitlab&project=${SONAR_PROJECT_KEY}&repository=${CI_PROJECT_ID}&monorepo=${IS_MONOREPO}" \
+        ${SONAR_HOST_URL}api/alm_settings/set_gitlab_binding --tries 1 --timeout 1 --quiet \
+        && echo "Integration with gitlab is enabled" || echo "Failed to enable integration with gitlab"
+      else
+        echo 'You can set $GITLAB_INTEGRATION_ENABLED: "true" to get notifications with scan details'
+      fi
+    - >
+      sonar-scanner -X
+      -Dsonar.projectKey=$SONAR_PROJECT_KEY
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.login=$SONAR_TOKEN
+      -Dsonar.qualitygate.wait=true
+      $SONAR_JAVA_OPTIONS
+      $SONAR_BUILD_OPTIONS
+      $SONAR_MERGE_OPTIONS
+      $SONAR_CUSTOM_OPTIONS
+
+.sonarqube-java-maven:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:11.0
+  variables:
+    SONAR_HOST_URL: "https://path.to.your.sonarqube.com/"
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=java -Dsonar.java.coveragePlugin=jacoco -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java"
+    SONAR_MAVEN_OPTIONS: "-Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml -Dsonar.java.binaries=target/classes -Dsonar.java.libraries=target/dependency/*.jar"
+    ENABLE_GITLAB_INTEGRATION: "false"
+    IS_MONOREPO: "false"
+    GIT_DEPTH: "0"
+  before_script:
+    - |
+      if [[ -z ${SONAR_PROJECT_KEY+x} ]]
+      then
+        echo "SONAR_PROJECT_KEY is not set. Please set it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+        exit 1
+      else
+        if [[ "${SONAR_PROJECT_KEY%.*}" != "$SONAR_PROJECT_NAME" ]]
+        then
+          echo "SONAR_PROJECT_KEY should be \"$SONAR_PROJECT_NAME.$CI_PROJECT_NAME\". Please update it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+          exit 1
+        else
+          echo "SONAR_PROJECT_KEY: $SONAR_PROJECT_KEY"
+        fi
+      fi
+  script:
+    - |
+      if [[ -n "$CI_MERGE_REQUEST_ID" ]]
+      then
+        SONAR_MERGE_OPTIONS="-Dsonar.pullrequest.base=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -Dsonar.pullrequest.branch=$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME -Dsonar.pullrequest.key=$CI_MERGE_REQUEST_IID";
+      fi
+      echo "SONAR_MERGE_OPTIONS: $SONAR_MERGE_OPTIONS"
+    - |
+      echo "GITLAB_INTEGRATION_ENABLED: $ENABLE_GITLAB_INTEGRATION"
+      if [[ $ENABLE_GITLAB_INTEGRATION == "true" ]]
+      then
+        echo "IS_MONOREPO: $IS_MONOREPO"
+        wget --method POST \
+        --header "Authorization: Basic $(echo -n $SONAR_TOKEN: | base64)" \
+        --body-data "almSetting=Gitlab&project=${SONAR_PROJECT_KEY}&repository=${CI_PROJECT_ID}&monorepo=${IS_MONOREPO}" \
+        ${SONAR_HOST_URL}api/alm_settings/set_gitlab_binding --tries 1 --timeout 1 --quiet \
+        && echo "Integration with gitlab is enabled" || echo "Failed to enable integration with gitlab"
+      else
+        echo 'You can set $GITLAB_INTEGRATION_ENABLED: "true" to get notifications with scan details'
+      fi
+    - >
+      sonar-scanner -X
+      -Dsonar.projectKey=$SONAR_PROJECT_KEY
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.login=$SONAR_TOKEN
+      -Dsonar.qualitygate.wait=true
+      $SONAR_JAVA_OPTIONS
+      $SONAR_MAVEN_OPTIONS
+      $SONAR_MERGE_OPTIONS
+      $SONAR_CUSTOM_OPTIONS
+
+.sonarqube-kotlin-maven:
+  variables:
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=kotlin\n
+      -Dsonar.java.coveragePlugin=jacoco\n
+      -Dsonar.sources=src/main/kotlin\n
+      -Dsonar.tests=src/test/kotlin"
+  extends:
+    - .sonarqube-java-maven
+
+.sonarqube-java-gradle:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:11.0
+  variables:
+    SONAR_HOST_URL: "https://path.to.your.sonarqube.com/"
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=java -Dsonar.java.coveragePlugin=jacoco -Dsonar.sources=src/main/java -Dsonar.tests=src/test/java"
+    SONAR_GRADLE_OPTIONS: "-Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml -Dsonar.java.binaries=build/classes"
+    ENABLE_GITLAB_INTEGRATION: "false"
+    IS_MONOREPO: "false"   
+    GIT_DEPTH: "0"
+  before_script:
+    - |
+      if [[ -z ${SONAR_PROJECT_KEY+x} ]]
+      then
+        echo "SONAR_PROJECT_KEY is not set. Please set it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+        exit 1
+      else
+        if [[ "${SONAR_PROJECT_KEY%.*}" != "$SONAR_PROJECT_NAME" ]]
+        then
+          echo "SONAR_PROJECT_KEY should be \"$SONAR_PROJECT_NAME.$CI_PROJECT_NAME\". Please update it in Gitlab CI/CD variables (Settings -> CI/CD -> Variables)"
+          exit 1
+        else
+          echo "SONAR_PROJECT_KEY: $SONAR_PROJECT_KEY"
+        fi
+      fi
+  script:
+    - |
+      if [[ -n "$CI_MERGE_REQUEST_ID" ]]
+      then
+        SONAR_MERGE_OPTIONS="-Dsonar.pullrequest.base=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME -Dsonar.pullrequest.branch=$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME -Dsonar.pullrequest.key=$CI_MERGE_REQUEST_IID";
+      fi
+      echo "SONAR_MERGE_OPTIONS: $SONAR_MERGE_OPTIONS"
+    - |
+      echo "GITLAB_INTEGRATION_ENABLED: $ENABLE_GITLAB_INTEGRATION"
+      if [[ $ENABLE_GITLAB_INTEGRATION == "true" ]]
+      then
+        echo "IS_MONOREPO: $IS_MONOREPO"
+        wget --method POST \
+        --header "Authorization: Basic $(echo -n $SONAR_TOKEN: | base64)" \
+        --body-data "almSetting=Gitlab&project=${SONAR_PROJECT_KEY}&repository=${CI_PROJECT_ID}&monorepo=${IS_MONOREPO}" \
+        ${SONAR_HOST_URL}api/alm_settings/set_gitlab_binding --tries 1 --timeout 1 --quiet \
+        && echo "Integration with gitlab is enabled" || echo "Failed to enable integration with gitlab"
+      else
+        echo 'You can set $GITLAB_INTEGRATION_ENABLED: "true" to get notifications with scan details'
+      fi
+    - >
+      sonar-scanner -X
+      -Dsonar.projectKey=$SONAR_PROJECT_KEY
+      -Dsonar.host.url=$SONAR_HOST_URL
+      -Dsonar.login=$SONAR_TOKEN
+      -Dsonar.qualitygate.wait=true
+      $SONAR_JAVA_OPTIONS
+      $SONAR_GRADLE_OPTIONS
+      $SONAR_MERGE_OPTIONS
+      $SONAR_CUSTOM_OPTIONS
+
+.sonarqube-kotlin-gradle:
+  variables:
+    SONAR_JAVA_OPTIONS: "-Dsonar.language=kotlin\n
+      -Dsonar.java.coveragePlugin=jacoco\n
+      -Dsonar.sources=src/main/kotlin\n
+      -Dsonar.tests=src/test/kotlin"
+    SONAR_GRADLE_OPTIONS:
+      "-Dsonar.coverage.jacoco.xmlReportPaths=build/reports/jacoco/test/jacocoTestReport.xml\n
+      -Dsonar.java.binaries=build/classes/java/main,build/classes/kotlin/main"
+  extends:
+    - .sonarqube-java-gradle
+
+.helm-lint:
+  stage: lint
+  image: alpine/helm:3.12.3
+  variables:
+    PATH_TO_CHART: ""
+  script:
+    - helm lint $PATH_TO_CHART
+
+.docker-lint:
+  stage: lint
+  image: docker.io/hadolint/hadolint:v2.12.0-alpine
+  variables:
+    DOCKERFILE: $CI_PROJECT_DIR/Dockerfile
+    FORMAT: tty
+    THRESHOLD: info
+    PATH_IN_REPORT: $DOCKERFILE
+    HADOLINT_OPTIONS: ""
+  script:
+    - >
+      hadolint
+      --format $FORMAT
+      --failure-threshold $THRESHOLD
+      --file-path-in-report $PATH_IN_REPORT
+      $HADOLINT_OPTIONS
+      $DOCKERFILE | tee $CI_PROJECT_DIR/hadolint.report
+  artifacts:
+    expire_in: 1 week
+    when: always
+    reports:
+      codequality:
+        - $CI_PROJECT_DIR/hadolint.report
+    paths:
+      - $CI_PROJECT_DIR/hadolint.report
+
+.sonarqube-scan:
+  stage: scan
+  image: sonarsource/sonar-scanner-cli:11.0
+  before_script:
+    - |
+      if [ ! -z $CI_MERGE_REQUEST_IID ]; then
+        echo 'sonar.pullrequest.key=${env.CI_MERGE_REQUEST_IID}' >> sonar-project.properties
+        echo 'sonar.pullrequest.base=${env.CI_MERGE_REQUEST_TARGET_BRANCH_NAME}' >> sonar-project.properties
+        echo 'sonar.pullrequest.branch=${env.CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}' >> sonar-project.properties
+      else
+        echo 'sonar.branch.name=${env.CI_COMMIT_BRANCH}' >> sonar-project.properties
+      fi
+  script:
+    - |
+      if [[ -e sonar-project.properties ]]
+      then
+        sonar-scanner
+      else
+        echo -n "Please create the sonar-project.properties file to the root of your project.
+                 Here is an example of confiugration file for Python:
+                 ---
+                 sonar.projectKey=${env.SONAR_PROJECT_KEY}.${env.CI_PROJECT_NAME}
+                 sonar.projectName=${env.SONAR_PROJECT_KEY}.${env.CI_PROJECT_NAME}
+                 sonar.python.coverage.reportPaths=coverage.xml
+                 sonar.python.xunit.reportPath=junit.xml
+                 sonar.sources=.
+                 sonar.inclusions=**/*.py
+                 sonar.exclusions=**/migrations/*.py,scripts/**,bin/**,alembic/**,tests/**,docs/**,logo/**
+                 sonar.host.url=${env.SONAR_HOST_URL}
+                 sonar.login=${env.SONAR_TOKEN}
+                 sonar.gitlab.commit_sha=${env.CI_COMMIT_SHA}
+                 sonar.gitlab.project_id=${env.CI_PROJECT_ID}
+                 sonar.qualitygate.wait=true
+                 ---"
+        exit 1
+      fi
+
+.validate-by-yamllint:
+  stage: validate
+  variables:
+    YAMLLINT_ARGS: ""
+    CONFIGS_TO_VALIDATE: "config/*"
+  image: ghcr.io/ffurrer2/yamllint
+  script:
+    - yamllint $YAMLLINT_ARGS $CONFIGS_TO_VALIDATE
+
+.validate-by-schema:
+  stage: validate
+  image:
+    name: docker.io/python:3.11.2-alpine
+  variables:
+    VALIDATION_SCHEMA_FILE: "configs/schema.yml"
+    CONFIGS_TO_VALIDATE: "configs/*.yaml"
+  script:
+    - python3 /bin/validate-configs.py $VALIDATION_SCHEMA_FILE $CONFIGS_TO_VALIDATE
+
+.gitleaks:
+  stage: validate
+  variables:
+    GITLEAKS_LOG_OPTS: '--'
+  rules:
+  - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+  image:
+    name: docker.io/zricethezav/gitleaks
+    entrypoint: ['']
+  script:
+  - gitleaks detect --source ${CI_PROJECT_DIR} -v --log-opts "${GITLEAKS_LOG_OPTS}"

@@ -1,0 +1,18 @@
+### Send notification after deploy
+.send_notification:
+  stage: notification
+  image: docker.io/debian:12.5
+  variables:
+    MATTERMOST_ADDRESS: https://path.to.your.mettermost/hooks/
+    MATTERMOST_HOOK: ""
+    MATTERMOST_MESSAGE: ""
+  script:
+    - >-
+      status_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                         -d "payload={\"text\": \"$MATTERMOST_MESSAGE\"}" \
+                         $MATTERMOST_ADDRESS/$MATTERMOST_HOOK)
+      if [ $status_code -ne 200 ]; then
+        echo "Failed to send message to Mattermost. Error code - $status_code";
+          exit 1;
+      fi
+  allow_failure: true

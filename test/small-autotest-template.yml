@@ -1,0 +1,32 @@
+include:
+  - 'test/autotests/autotest.yml'
+
+stages:
+  - prepare
+  - test
+  - test_report
+  - deploy-pages
+
+test_env_prepare:
+  stage: prepare
+  extends:
+    - .test_env_prepare
+
+run_autotests_java:
+  stage: test
+  extends:
+    - .run_autotests_java
+
+create_autotests_report:
+  stage: test_report
+  needs:
+    - job: run_autotests_java
+  extends:
+    - .create_autotests_report
+
+pages:
+  stage: deploy-pages
+  needs:
+    - job: create_autotests_report
+  extends:
+    - .pages

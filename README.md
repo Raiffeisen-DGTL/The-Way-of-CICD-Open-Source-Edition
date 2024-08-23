@@ -3,19 +3,21 @@
   <center><img src="./docs-logo/thewayofcicd.png" align="center" width="500" alt="the way of cicd"></center>
 </div>
 
-
 ## About the Project
 
 The Way of CI/CD is a project from which you can assemble your custom pipeline by using different pieces of code or by including entire stages. This project serves as a builder for creating pipelines in GitLab.
 
 The Way of CI/CD includes the following pipeline stages:
 
-- [code-scan](./code-scan/)
-- [version](./version/)
-- [build](./build/)
-- [test](./test/)
-- [release](./release/)
-- [deploy](./deploy/)
+- [code-scan](code-scan/)
+- [define-registry](define-registry/)
+- [pipeline](pipeline/)
+- [version](version/)
+- [build](build/)
+- [test](test/)
+- [release](release/)
+- [deploy](deploy/)
+- [notification](notification)
 
 You can find usage instructions for specific pipeline stages in the directories above.
 
@@ -30,7 +32,7 @@ include:
   - project: 'path-to-gitlab-repo/the-way-of-cicd-open-source-edition'
     ref: 'master'
     file:
-      - '/build/v3/build.yml'
+      - 'build/build.yml'
 ```
 
 `extends`:
@@ -60,7 +62,7 @@ For more details on all directives and implementation details, you can refer to 
 
 ## Pipeline Design
 
-The diagram shows the main stages of the pipeline, which are recommended to be used in your project to build a pipeline.
+The diagram shows the main pipeline stages, which are recommended to use in your project to build a pipeline.
 
 ```mermaid
 flowchart LR
@@ -121,6 +123,7 @@ flowchart LR
 
   classDef ClusterBackground fill:#ffffde;
   class test,codescan,version,pipeline,build,binaryscan,deploy,release ClusterBackground;
+
 ```
 
 ## Recommended Requirements for Implementing Your Pipeline
@@ -173,13 +176,17 @@ flowchart LR
 - It is not recommended to perform a complete build of the base image directly in the service pipeline; instead, it should be treated as a base image and pulled from the registry.
 - Avoid using `latest` tags in the versioning of external service dependencies.
 
+### Binary Scan
+
+- Image scanning should have a mechanism for blocking or skipping further pipeline execution based on conditions determined by the team.
+- After scanning images, we should be able to examine vulnerabilities in the scanned image.
+
 ### Test
 
-Autotest section includes:
-
-- Running Java+Gradle/Java+Maven autotests;
-- Creating reports in Allure `.create_autotests_report` with saving reports in Gitlab pages `.pages`;
-- The ability to send reports on autotest runs to the MatterMattermost via bot `.send_report_to_mattermost` has been taken into account.
+The autotests section includes:
+- Launching Java+Gradle/Java+Maven autotests;
+- Creating reports in Allure (`.create_autotests_report`) with saving reports on Github pages (`.pages`);
+- The possibility of sending reports on autotest launches to the mattermost bot (`.send_report_to_matter most`).
 
 ### Release
 
@@ -217,7 +224,6 @@ You can participate in the project in the following ways:
 
 When developing and improving the project, we follow these rules:
 
-- If you want to change existing functionality in one of the pipeline sections, you should copy the existing structure, creating a new directory from the current one, e.g., from `/build/v3/`, you create `/build/v4/`, and place everything from the previous version there while adding new functionality. This helps protect users of the product from unexpected changes and guarantees stability.
 - If you find any issues or bugs, you can make fixes in the existing pipeline version.
 - Pay attention to documentation. We provide examples in each directory corresponding to the pipeline step, describing how to use the pipeline's functionality.
 - Parameterization: All values that can be customized should be. Teams should have flexibility in usage, so create variables and use them as parameters.

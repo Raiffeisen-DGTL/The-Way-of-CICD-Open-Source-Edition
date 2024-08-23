@@ -1,0 +1,14 @@
+mode: Mainline
+increment: Inherit
+tag-prefix: '[vV]?'
+major-version-bump-message: 'branch\s?''(breaking|major).*into\s?''(master|main)'''
+minor-version-bump-message: 'branch\s?''(feature|minor).*into\s?''(master|main)'''
+patch-version-bump-message: 'branch\s?''(fix|bugfix|hotfix|patch).*into\s?''(master|main)'''
+no-bump-message: 'from\s(none|skip|doc)'
+legacy-semver-padding: 0
+build-metadata-padding: 0
+commits-since-version-source-padding: 0
+commit-message-incrementing: Disabled
+branches: {}
+ignore:
+  sha: []
