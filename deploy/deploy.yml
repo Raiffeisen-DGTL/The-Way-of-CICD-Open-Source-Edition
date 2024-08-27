@@ -1,0 +1,137 @@
+### Deploy via reference tag
+.deploy:
+  ### Image for deploy
+  image: alpine/k8s:1.28.0
+  ### Fetch kubeconfig
+  fetch_kubeconfig:
+    - export KUBECONFIG="$K8S_CONFIG"
+  ### Delpoy via kubectl
+  kubectl:
+    - kubectl apply -f ${YAML_TO_DEPLOY} ${DEPLOY_ARGS}
+  ### Deploy via helm
+  helm:
+    - helm upgrade --install $RELEASE_NAME $CHART_TO_DEPLOY -n $NAMESPACE $HELM_ARGS
+
+### Deploy via extends
+.deploy-with-kubectl:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    YAML_TO_DEPLOY: "$CI_PROJECT_DIR/manifests/"
+    DEPLOY_ARGS: ""
+  script:
+    - CMD="kubectl apply -f ${YAML_TO_DEPLOY} ${DEPLOY_ARGS}"
+    - eval $CMD
+
+.deploy-with-helm:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    NAMESPACE: "$CI_PROJECT_NAME"
+    RELEASE_NAME: "$CI_PROJECT_NAME"
+    CHART_TO_DEPLOY: "helm-chart-go-web-server"
+    HELM_ARGS: >-
+      --wait
+  script:
+    - CMD="helm upgrade --install $RELEASE_NAME $CHART_TO_DEPLOY -n $NAMESPACE $HELM_ARGS"
+    - eval $CMD
+
+.deploy-with-helm-by-gitlab-agent:
+  stage: deploy
+  image: alpine/k8s:1.28.0
+  variables:
+    NAMESPACE: "$CI_PROJECT_NAME"
+    RELEASE_NAME: "$CI_PROJECT_NAME"
+    GITLAB_AGENT_PROJECT: "YOUR_PROJECT_WITH_GITLAB_AGENT"
+    KUBERNETES_CLUSTER_NAME: "NAME_OF_YOUR_KUBERNETES_CLUSTER" # Infrastructure -> Kubernetes clusters
+    CHART_TO_DEPLOY: "helm-chart-go-web-server"
+    HELM_ARGS: >-
+      --wait
+      --atomic
+  before_script:
+    - kubectl config use-context ${GITLAB_AGENT_PROJECT}:${KUBERNETES_CLUSTER_NAME}
+  script:
+    - !reference [.deploy, helm]
+
+.werf-deploy-local-chart:
+  stage: deploy
+  image: https://ghcr.io/werf:2
+  variables:
+    WERF_LOG_COLOR_MODE: "on"
+    WERF_KUBE_CONTEXT: "${GITLAB_AGENT_PROJECT}:${KUBERNETES_CLUSTER_NAME}"
+    WERF_NAMESPACE: "$CI_PROJECT_NAME"
+    WERF_RELEASE: "$CI_PROJECT_NAME"      # Release Name
+    CHART_TO_DEPLOY: ".helm"
+    WERF_PLAN: "false"                    # Running in dry-run mode (disabled by default)
+    WERF_ATOMIC: "true"                   # Automatic rollback of the release (--atomic)
+    WERF_DEV: "true"                      # Disable giterminism (disable checking uncommitted files)
+    WERF_TIMEOUT: "1800"
+    WERF_ARGS: ""
+  script:
+    - |
+      if [[ ! -f "werf.yaml" ]]; then
+        echo "Creating werf.yaml file"
+        yq -n ".project = \"$WERF_RELEASE\" | .configVersion = 1" > werf.yaml
+        if [[ "$CHART_TO_DEPLOY" != ".helm" ]]; then
+          yq -i ".deploy.helmChartDir = \"$CHART_TO_DEPLOY\"" werf.yaml
+        fi
+      fi
+    - echo "KUBERNETES_CLUSTER_NAME == "$KUBERNETES_CLUSTER_NAME""
+    - echo "WERF_PLAN == "$WERF_PLAN""
+    - |
+      if [[ "$WERF_PLAN" == "false" ]]; then
+        werf converge $WERF_ARGS
+      elif [[ "$WERF_PLAN" == "true" ]]; then
+        werf config render
+        werf plan $WERF_ARGS
+      else
+        echo "Please check WERF_PLAN variable!"
+      fi
+
+.werf-deploy-remote-chart:
+  stage: deploy
+  image: https://ghcr.io/werf:2
+  variables:
+    WERF_LOG_COLOR_MODE: "on"
+    WERF_KUBE_CONTEXT: "${GITLAB_AGENT_PROJECT}:${KUBERNETES_CLUSTER_NAME}"
+    WERF_NAMESPACE: "$CI_PROJECT_NAME"
+    WERF_RELEASE: "$CI_PROJECT_NAME"       # Release Name
+    REMOTE_CHART_NAME: ""
+    REMOTE_CHART_VERSION: ""
+    REMOTE_REPO_ALIAS: ""
+    REMOTE_REPO_URL: ""
+    WERF_PLAN: "false"                    # Running in dry-run mode (disabled by default)
+    WERF_ATOMIC: "true"                   # Automatic rollback of the release (--atomic)
+    WERF_DEV: "true"                      # Disable giterminism (disable checking uncommitted files)
+    WERF_TIMEOUT: "1800"
+    WERF_ARGS: ""
+  script:
+    - |
+      if [[ ! -f "werf.yaml" ]]; then
+        echo "Creating werf.yaml file"
+        yq -n ".project = \"$WERF_RELEASE\" | \
+               .configVersion = 1" > werf.yaml
+      fi
+    - |
+      if [[ ! -f ".helm/Chart.yaml" ]]; then
+        echo "Creating .helm/Chart.yaml file"
+        mkdir -p .helm
+        yq -n ".apiVersion = \"v2\" | \
+               .dependencies.[0] += {\"name\": \"$REMOTE_CHART_NAME\", \
+                                     \"version\": \"$REMOTE_CHART_VERSION\", \
+                                     \"repository\": \"@\" + \"$REMOTE_REPO_ALIAS\"}" > .helm/Chart.yaml
+      fi
+    - cat .helm/Chart.yaml
+    - werf helm repo add "$REMOTE_REPO_ALIAS" "$REMOTE_REPO_URL" --pass-credentials --username "$REGISTRY_USER" --password "$REGISTRY_PASSWORD" --log-quiet
+    - werf helm dependency update .helm --log-quiet
+    - echo "KUBERNETES_CLUSTER_NAME == "$KUBERNETES_CLUSTER_NAME""
+    - echo "WERF_PLAN == "$WERF_PLAN""
+    - |
+      if [[ "$WERF_PLAN" == "false" ]]; then
+        werf converge $WERF_ARGS
+      elif [[ "$WERF_PLAN" == "true" ]]; then
+        werf config render
+        werf plan $WERF_ARGS
+      else
+        echo "Please check WERF_PLAN variable!"
+      fi

@@ -1,0 +1,50 @@
+.define_docker_registry:
+  stage: define_registry
+  image: docker.io/alpine:3.17
+  script:
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ] || [ $CI_COMMIT_TAG ]
+      then
+        echo "REGISTRY=${DOCKER_REGISTRY}" > registry.env
+      else
+        echo "REGISTRY=${DOCKER_REGISTRY_SNAPSHOT}" > registry.env
+      fi
+      cat registry.env
+  artifacts:
+    reports:
+      dotenv:
+        - ./registry.env
+
+.define_helm_repo:
+  stage: define_registry
+  image: docker.io/alpine:3.17
+  script:
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]
+      then
+        echo "REGISTRY_HELM_REPO=${REGISTRY_HELM_REPO_LOCAL}" > helm-repo.env
+      else
+        echo "REGISTRY_HELM_REPO=${REGISTRY_HELM_REPO_LOCAL}" > helm-repo.env
+      fi
+      cat helm-repo.env
+  artifacts:
+    reports:
+      dotenv:
+        - ./helm-repo.env
+
+.define_generic_repo:
+  stage: define_registry
+  image: docker.io/alpine:3.17
+  script:
+    - |
+      if [ "$CI_COMMIT_BRANCH" == "$CI_DEFAULT_BRANCH" ]
+      then
+        echo "REGISTRY_GENERIC_REPO=${REGISTRY_GENERIC_REPO_RELEASE}" > generic-repo.env
+      else
+        echo "REGISTRY_GENERIC_REPO=${REGISTRY_GENERIC_REPO_SNAPSHOT}" > generic-repo.env
+      fi
+      cat generic-repo.env
+  artifacts:
+    reports:
+      dotenv:
+        - ./generic-repo.env

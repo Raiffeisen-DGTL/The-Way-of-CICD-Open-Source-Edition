@@ -1,0 +1,52 @@
+include:
+  - 'test/autotests/autotest.yml'
+
+stages:
+  - prepare
+  - build
+  - test
+  - test_report
+  - deploy-pages
+  - send_notification
+
+variables:
+  BUILD_SEPARATELY: "true"
+
+test_env_prepare:
+  stage: prepare
+  extends:
+    - .test_env_prepare
+
+build_tests:
+  stage: build
+  extends:
+    - .build_tests
+
+run_autotests_java:
+  stage: test
+  needs:
+    - job: build_tests
+  extends:
+    - .run_autotests_java
+
+create_autotests_report:
+  stage: test_report
+  needs:
+    - job: run_autotests_java
+  extends:
+    - .create_autotests_report
+
+pages:
+  stage: deploy-pages
+  needs:
+    - job: create_autotests_report
+  extends:
+    - .pages
+
+send_report_to_mattermost:
+  stage: send_notification
+  needs:
+    - job: test_env_prepare
+    - job: create_autotests_report
+  extends:
+    - .send_report_to_mattermost

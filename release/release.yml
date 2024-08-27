@@ -1,0 +1,37 @@
+### Create release and tag in gitlab
+.release:
+  stage: release
+  variables:
+    REGISTRY_HOST: ""
+    REGISTRY_PATH: ""
+    VERSION: "YOUR VERSION"
+    ASSET_URL: "https://${REGISTRY_HOST}/${REGISTRY_PATH}/${VERSION}"
+    DESCRIPTION: "Artifact can be reached using the following link ${ASSET_URL}"
+  image: registry.gitlab.com/gitlab-org/release-cli:v0.16.0
+  script:
+    - check_version=$(release-cli
+                      --server-url $CI_SERVER_URL
+                      --job-token $CI_JOB_TOKEN
+                      --project-id $CI_PROJECT_ID
+                      get --tag-name $VERSION
+                      2>&1) || 2>/dev/null
+    - if echo "$check_version" | grep -q "404 Not Found"; then
+        echo "Creating a new release";
+          release-cli
+          --server-url $CI_SERVER_URL
+          --job-token $CI_JOB_TOKEN
+          --project-id $CI_PROJECT_ID
+          create
+          --name Release-$CI_PROJECT_NAME-$VERSION
+          --description "$DESCRIPTION"
+          --tag-name $VERSION
+          --ref $CI_COMMIT_SHA
+          --released-at $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          --assets-link "{\"name\":\"${CI_PROJECT_NAME}\",\"url\":\"${ASSET_URL}\"}" || exit 1;
+      else
+        echo "Version already exists";
+          exit 0;
+      fi
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - when: never

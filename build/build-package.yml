@@ -1,0 +1,295 @@
+variables:
+  PYTHON_IMAGE: "docker.io/python:3.11.9-slim"
+
+### Build image via kaniko
+
+.build_kaniko:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:1.20.0
+    entrypoint: [""]
+  variables:
+    REGISTRY_HOST: #default points to hub.docker.com
+    DOCKERFILE: "Dockerfile"
+    DOCKER_REGISTRY: "YOUR_DOCKER_REGISTRY"
+    DESTINATION: "$REGISTRY_HOST/$DOCKER_REGISTRY/${IMAGE_NAME}:$IMAGE_TAG"
+    IMAGE_TAG: "TAG"
+  before_script:
+  script:
+    - echo "{\"auths\":{\"$REGISTRY_HOST\":{\"username\":\"$REGISTRY_USER\",\"password\":\"$REGISTRY_PASSWORD\"}}}" > /kaniko/.docker/config.json
+    - >
+      CMD="/kaniko/executor
+      --context $CI_PROJECT_DIR
+      --dockerfile $CI_PROJECT_DIR/$DOCKERFILE
+      --destination $DESTINATION
+      --build-arg REGISTRY_USER=$REGISTRY_USER
+      --build-arg REGISTRY_PASSWORD=$REGISTRY_PASSWORD
+      $DOCKER_BUILD_ARGS"
+    - eval $CMD
+
+### Build image via docker
+
+.build_docker:
+  stage: build
+  image: docker:24.0.5-cli-alpine3.18
+  services:
+    - name: docker:24.0.5-dind-rootless
+      alias: dind
+  variables:
+    DOCKER_HOST: tcp://dind:2375
+    REGISTRY_HOST: #default points to hub.docker.com
+    DOCKERFILE: "Dockerfile"
+    DOCKER_REGISTRY: "YOUR_DOCKER_REGISTRY"
+    DESTINATION: "$REGISTRY_HOST/$DOCKER_REGISTRY/${IMAGE_NAME}:$IMAGE_TAG"
+    IMAGE_TAG: "TAG"
+  script:
+    - docker login -u "$REGISTRY_USER" -p "$REGISTRY_PASSWORD" $REGISTRY_HOST || exit 1
+    - >
+      CMD="docker build .
+      -f $DOCKERFILE ${DOCKER_BUILD_ARGS}
+      --tag $DESTINATION
+      --build-arg REGISTRY_USER=${REGISTRY_USER}
+      --build-arg REGISTRY_PASSWORD=${REGISTRY_PASSWORD}
+      $DOCKER_BUILD_ARGS"
+    - eval $CMD
+    - docker push $DESTINATION
+  after_script:
+    - docker logout $REGISTRY_SERVER
+
+
+### Build and test with gradle
+
+.build_and_test_gradle:
+  stage: build
+  image: $JVM_IMAGE
+  services:
+    - name: docker:24.0.5-dind-rootless
+      alias: dind
+      entrypoint: ["dockerd"]
+      command: ["--host=tcp://0.0.0.0:2375"]
+  variables:
+    JVM_IMAGE: "gradle:jdk11-alpine"
+    PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+    REGISTRY_HOST: #default points to hub.docker.com
+    DOCKER_HOST: tcp://dind:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    TESTCONTAINERS_RYUK_DISABLED: "true"
+    TESTCONTAINERS_CHECKS_DISABLE: "true"
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+    GRADLE_USER_HOME: ".gradle/"
+    JUNIT_PATH: "./build/test-results/**/*.xml"
+    GRADLE_PARAMS: "-Dgradle.wrapperUser=$REGISTRY_USER -Dgradle.wrapperPassword=$REGISTRY_PASSWORD -Pregistry_user=$REGISTRY_USER -Pregistry_password=$REGISTRY_PASSWORD"
+  artifacts:
+    reports:
+      junit: $JUNIT_PATH
+    paths:
+      - build
+    expire_in: 30 mins
+  script:
+    - mkdir ~/.docker
+    - echo "{\"auths\":{\"$REGISTRY_HOST\":{\"username\":\"$REGISTRY_USER\",\"password\":\"$REGISTRY_PASSWORD\"}}}" > ~/.docker/config.json
+    - $GRADLE $GRADLE_PARAMS build --build-cache
+  cache:
+    key: $PIPELINE_CACHE_KEY
+    paths:
+      - $GRADLE_USER_HOME
+    policy: push
+
+### Build and publish image with gradle
+
+.build_image_jib:
+  stage: publish-image
+  image: $JVM_IMAGE
+  variables:
+    JVM_IMAGE: "gradle:jdk11-alpine"
+    REGISTRY_HOST: #default points to hub.docker.com
+    OCI_REGISTRY: $REGISTRY
+    PIPELINE_CACHE_KEY: $CI_COMMIT_REF_NAME-$CI_PIPELINE_ID
+    GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+    GRADLE_USER_HOME: ".gradle/"
+    GRADLE_PARAMS: "-Dgradle.wrapperUser=$REGISTRY_USER -Dgradle.wrapperPassword=$REGISTRY_PASSWORD -Pregistry_user=$REGISTRY_USER -Pregistry_password=$REGISTRY_PASSWORD"
+  script:
+    - $GRADLE jib $GRADLE_PARAMS
+    - cat ./deploy.env
+  artifacts:
+    reports:
+      dotenv: ./deploy.env
+    expire_in: 30 mins
+  cache:
+    key: $PIPELINE_CACHE_KEY
+    paths:
+      - $GRADLE_USER_HOME
+    policy: pull
+
+.package_helm_chart:
+  stage: build
+  image: alpine/k8s:1.28.0
+  variables:
+    REGISTRY_HELM_REPO_VIRT: "https://path.to.your.helm.repo.com"
+    REGISTRY_HELM_REPO_LOCAL: "https://path.to.your.helm.repo.com"
+    PATH_TO_CHART: ""
+  script:
+    - HELM_REPO=$(basename $REGISTRY_HELM_REPO_VIRT)
+    - helm repo add $HELM_REPO $REGISTRY_HELM_REPO_VIRT --username=$REGISTRY_USER --password=$REGISTRY_PASSWORD
+    - helm repo update
+    - helm package $PATH_TO_CHART
+    - CHART_PACKAGE=$(ls -t | grep tgz | head -n 1)
+    - curl -s -u $REGISTRY_USER:$REGISTRY_PASSWORD -T $CHART_PACKAGE "$REGISTRY_HELM_REPO_LOCAL/$CI_PROJECT_NAME/$CHART_PACKAGE"
+    - echo
+    - echo -n "Your chart has been pushed to $REGISTRY_HELM_REPO_LOCAL/$CI_PROJECT_NAME/$CHART_PACKAGE"
+
+### Build and test with maven
+
+.build_and_test_maven:
+  stage: build
+  image: $JVM_IMAGE
+  services:
+    - name: docker.io/dind:19.03
+      alias: dind
+      entrypoint: ["dockerd"]
+      command: ["--host=tcp://0.0.0.0:2375"]
+  variables:
+    JVM_IMAGE: "docker.io/library/maven:3.8.4-openjdk-11-slim"
+    DOCKER_HOST: tcp://dind:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    TESTCONTAINERS_RYUK_DISABLED: "true"
+    TESTCONTAINERS_CHECKS_DISABLE: "true"
+    MAVEN_OPTS: "-Dmaven.repo.local=./repository"
+    MAVEN_ADDITIONAL_OPTS: ""
+    MAVEN_SETTINGS_PATH: "./cicd/settings.xml"
+    JUNIT_PATH: "./build/test-results/**/*.xml"
+  artifacts:
+    reports:
+      junit: $JUNIT_PATH
+    paths:
+      - target/*.jar
+    expire_in: 30 mins
+  script:
+    - mkdir ~/.docker
+    - echo "{\"auths\":{\"$REGISTRY_HOST\":{\"username\":\"$REGISTRY_USER\",\"password\":\"$REGISTRY_PASSWORD\"}}}" > ~/.docker/config.json
+    - mvn -s $MAVEN_SETTINGS_PATH $MAVEN_OPTS $MAVEN_ADDITIONAL_OPTS package
+
+### Build and publish jar with maven
+
+.build_with_maven_and_publish_jar:
+  stage: publish-image
+  image: $JVM_IMAGE
+  services:
+    - name: docker.io/dind:19.03
+      alias: dind
+      entrypoint: ["dockerd"]
+      command: ["--host=tcp://0.0.0.0:2375"]
+  variables:
+    JVM_IMAGE: "docker.io/library/maven:3.8.4-openjdk-11-slim"
+    REGISTRY_HOST: #default points to hub.docker.com
+    DOCKER_HOST: tcp://dind:2375
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_DRIVER: overlay2
+    TESTCONTAINERS_RYUK_DISABLED: "true"
+    TESTCONTAINERS_CHECKS_DISABLE: "true"
+    MAVEN_OPTS: "-Dmaven.repo.local=./repository"
+    MAVEN_ADDITIONAL_OPTS: ""
+    MAVEN_SETTINGS_PATH: "./cicd/settings.xml"
+    JUNIT_PATH: "./build/test-results/**/*.xml"
+    DESTINATION_REPOSITORY_URL: "$REGISTRY_HOST/$DESTINATION_REPOSITORY_ID"
+  script:
+    - mkdir ~/.docker
+    - echo "{\"auths\":{\"$REGISTRY_HOST\":{\"username\":\"$REGISTRY_USER\",\"password\":\"$REGISTRY_PASSWORD\"}}}" > ~/.docker/config.json
+    - mvn -s $MAVEN_SETTINGS_PATH $MAVEN_OPTS $MAVEN_ADDITIONAL_OPTS -DaltDeploymentRepository=$DESTINATION_REPOSITORY_ID::https://$REGISTRY_USER:$REGISTRY_PASSWORD@$DESTINATION_REPOSITORY_URL deploy
+
+### Build with npm
+
+.build_npm:
+  image: docker.io/library/node:18.9.1-alpine
+  variables:
+    NPM_REPO: "path.to.your.npm.repo/api/npm/npm/"
+    NPM_OPTIONS: "--save --save-exact --timing --loglevel verbose"
+    NPM_COMMAND: "build"
+  script:
+    - |
+      cat << EOF > .npmrc
+      registry=https://$NPM_REPO
+      email = ${REGISTRY_USER}@youremail.ru
+      always-auth=true
+      //${NPM_REPO}:_auth=$(echo -n "$REGISTRY_USER:$REGISTRY_PASSWORD" | base64)
+      EOF
+    - |
+      for NPM_SCOPE_LINE in $NPM_SCOPE
+      do
+          NPM_SCOPE_NAME=${NPM_SCOPE_LINE%:*}
+          NPM_SCOPE_REPO=${NPM_SCOPE_LINE#*:}
+
+          echo "${NPM_SCOPE_NAME}:registry=https://${NPM_SCOPE_REPO}" >> .npmrc
+          echo "//${NPM_SCOPE_REPO}:_auth=$(echo -n "$REGISTRY_USER:$REGISTRY_PASSWORD" | base64)" >> .npmrc
+      done
+    - npm cache verify
+    - npm install $NPM_PACKAGES $NPM_OPTIONS
+    - npm run $NPM_COMMAND
+  cache:
+    key: "$CI_PROJECT_NAME"
+    paths:
+      - node_modules/
+
+.python-cache:
+  stage: cache
+  image: $PYTHON_IMAGE
+  cache: 
+    key:
+      files:
+        - poetry.lock
+      prefix: "${CI_PROJECT_NAME}-poetry"
+    paths:
+      - .venv
+  script:
+    - >
+      CMD="$LOCAL_POETRY_ARGS" 
+    - eval $CMD 
+    - poetry config http-basic.your.conf ${REGISTRY_USER} ${REGISTRY_PASSWORD}
+    - poetry config http-basic.team-name ${REGISTRY_USER} ${REGISTRY_PASSWORD}
+    - poetry config virtualenvs.in-project true
+    - poetry install
+
+.go-cache:
+  stage: build
+  cache:
+    key:
+      files:
+        - go.mod
+      prefix: "${CI_PROJECT_NAME}"
+    paths:
+      - .go/pkg/mod/
+  image: docker.io/golang:1.22.6
+  script:
+    - go mod download
+
+.go-build:
+  stage: build
+  image: docker.io/golang:1.22.6
+  cache:
+    key:
+      files:
+        - go.mod
+      prefix: "${CI_PROJECT_NAME}"
+    paths:
+      - .go/pkg/mod/
+    policy: pull
+  variables:
+    GOOS: linux
+    GOARCH: amd64
+    CGO_ENABLED: 0
+    PACKAGE_NAME: ${CI_PROJECT_NAME}
+    GO_ARGS: ""
+    LD_FLAGS: ""
+  script:
+    - |
+      if [ ! -z "$LD_FLAGS" ];then
+        go build ${GO_ARGS} -ldflags="${LD_FLAGS}" -o ${PACKAGE_NAME}
+      else
+        go build ${GO_ARGS} -o ${PACKAGE_NAME} 
+      fi
+  artifacts:
+    paths:
+      - ${PACKAGE_NAME}
+    expire_in: 30 mins
